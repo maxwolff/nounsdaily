@@ -2,9 +2,8 @@ import { BigNumber, ethers } from "ethers";
 import { promisify } from "util";
 import { getABI, getImplABI } from "./grabABI";
 import { IgApiClient } from "instagram-private-api";
-
-const svg2img = require("svg2img");
-const svg2imgAsync = promisify(svg2img);
+import svg2img, { svg2imgOptions } from "svg2img";
+import { FormatTypes } from "ethers/lib/utils";
 
 const timerMins = (mins: number) =>
   new Promise((res) => setTimeout(res, mins * 60 * 1000));
@@ -16,7 +15,11 @@ const exists = (expr: any) => {
     throw new ReferenceError("found an undefined");
   }
 };
-
+declare enum Format {
+  jpeg = "jpeg",
+  jpg = "jpg",
+  png = "png",
+}
 const getNounsJPGBuffer = async (
   nounsContract: ethers.Contract,
   id: number
@@ -27,15 +30,19 @@ const getNounsJPGBuffer = async (
 
   let b64obj = Buffer.from(URI, "base64").toString("utf-8");
   const b64svg = JSON.parse(b64obj).image;
-
-  return svg2imgAsync(b64svg, { format: "jpg" });
+  const opts: svg2imgOptions = { format: Format.jpg, quality: 100 };
+  svg2img(b64svg, opts, (err, buff) => {
+    if (err) throw err;
+    return buff;
+  });
+  // return svg2imgAsync(b64svg, { format: "jpg" });
 };
 
 const getAuctionInfo = async (
   ahContract: ethers.Contract,
   id: number,
   provider: ethers.providers.Provider
-): Promise<[winner: string, amount: number] | null> => {
+): Promise<[winner: string, amount: number, timestamp: number] | null> => {
   const filter = ahContract.filters.AuctionSettled(id);
   let res;
   try {
@@ -49,35 +56,12 @@ const getAuctionInfo = async (
     const winnerAddr = res[0].args?.winner;
     const amount = +(+res[0].args?.amount / 1e18).toFixed(2);
     const ens = await provider.lookupAddress(winnerAddr);
+    const block = await provider.getBlock(+res[0].blockNumber);
+
     const ensOrAddr = ens ? ens : winnerAddr;
-    return [ensOrAddr, amount];
+    return [ensOrAddr, amount, block.timestamp];
   } else {
     return null;
-  }
-};
-
-const post = async (jpgBuff: Buffer, caption: string, ig: IgApiClient) => {
-  try {
-    const publishResult = await ig.publish.photo({
-      file: jpgBuff.slice(),
-      caption,
-    });
-
-    if (publishResult.status !== "ok") {
-      throw "Publish failed";
-    } else {
-      console.log(`Posted ${caption}`);
-    }
-
-    const pfp = await ig.account.changeProfilePicture(jpgBuff);
-
-    if (pfp.status !== "ok") {
-      throw "Publish failed";
-    } else {
-      console.log(`Posted ${caption}`);
-    }
-  } catch (e) {
-    console.log(e);
   }
 };
 
@@ -95,13 +79,31 @@ const handleAuctionSettled = async (
       console.log(`polled id: ${id}`);
       return id;
     }
-    const [winner, amount] = maybeInfo;
-    caption = `Noun ${id} was auctioned for ${amount} ETH to ${winner}`;
+    const [winner, amount, ts] = maybeInfo;
+    const date = new Date(ts * 1000);
+    const dateString = `${date.getMonth()}-${date.getDate()}-${date
+      .getFullYear()
+      .toString()
+      .slice(2)}`;
+    caption = `Noun ${id} was auctioned for ${amount} ETH to ${winner} on ${dateString}`;
   } else {
     caption = `Noun ${id} was minted to the Nounders`;
   }
-  const buff = await getNounsJPGBuffer(nftContract, id);
-  await post(buff, caption, ig);
+  const jpgBuff = await getNounsJPGBuffer(nftContract, id);
+  try {
+    const publishResult = await ig.publish.photo({
+      file: jpgBuff,
+      caption,
+    });
+
+    if (publishResult.status !== "ok") {
+      throw "Publish failed";
+    } else {
+      console.log(`Posted ${caption}`);
+    }
+  } catch (e) {
+    console.log(e);
+  }
   return id + 1;
 };
 

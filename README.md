@@ -1,6 +1,13 @@
-Posts pictures of the day's Noun onto Instagram. Backfills posts for old Nouns.
+# Nouns Instagram Bot
 
-set -o allexport
-source .env
-npm build
-npm start
+Posts pictures of every day's Noun onto Instagram. Backfills posts for old Nouns. Posts at an interval to avoid being rate-limited / banned by instagram.
+
+- set -o allexport
+- source .env
+- npm build
+- npm start
+
+## TODO
+
+- SVG=> JPG quality is a bit lossy, todo: improve
+- could prob clean up code a bit, use typechain, etc but :shrug
